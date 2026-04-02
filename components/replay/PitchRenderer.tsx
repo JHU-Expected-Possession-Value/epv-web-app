@@ -7,7 +7,7 @@ const PITCH_HEIGHT = 68;
 const ORIGIN_X = 52.5;
 const ORIGIN_Y = 34;
 
-function dataToSvg(x: number, y: number): { x: number; y: number } {
+export function worldToSvg(x: number, y: number): { x: number; y: number } {
   return { x: x + ORIGIN_X, y: ORIGIN_Y - y };
 }
 
@@ -81,6 +81,15 @@ function playerFill(
   return UNKNOWN_TEAM_COLOR;
 }
 
+/** Decision hint in world coords (same as tracking: x∈[-52.5,52.5], y∈[-34,34]). */
+export type RecommendationOverlayWorld = {
+  fromX: number;
+  fromY: number;
+  toX: number;
+  toY: number;
+  label?: string | null;
+};
+
 export type PitchRendererProps = {
   frame: RenderFrame | null;
   home_team_id?: number | null;
@@ -93,6 +102,8 @@ export type PitchRendererProps = {
   teammateValues?: { player_id: number; value: number }[];
   /** Optional: highlight this teammate's EPV label (e.g. chosen pass target). */
   highlightTeammateId?: number | null;
+  /** Static recommendation arrow (no full resimulation). */
+  recommendationOverlay?: RecommendationOverlayWorld | null;
   className?: string;
 };
 
@@ -104,6 +115,7 @@ export default function PitchRenderer({
   possessorLabel = null,
   teammateValues,
   highlightTeammateId = null,
+  recommendationOverlay = null,
   className = "",
 }: PitchRendererProps) {
   if (!frame) {
@@ -118,8 +130,8 @@ export default function PitchRenderer({
   }
 
   const { ball, players } = frame;
-  const ballSvg = ball ? dataToSvg(ball.x, ball.y) : null;
-  const playersSvg = (players ?? []).map((p) => ({ ...p, ...dataToSvg(p.x, p.y) }));
+  const ballSvg = ball ? worldToSvg(ball.x, ball.y) : null;
+  const playersSvg = (players ?? []).map((p) => ({ ...p, ...worldToSvg(p.x, p.y) }));
   const possessorId = highlightPlayerId ?? frame.derived_possession?.player_id ?? inferPossessorId(frame);
 
   return (
@@ -153,6 +165,61 @@ export default function PitchRenderer({
         preserveAspectRatio="xMidYMid meet"
       >
         <PitchLines />
+        {recommendationOverlay &&
+          (() => {
+            const a = worldToSvg(recommendationOverlay.fromX, recommendationOverlay.fromY);
+            const b = worldToSvg(recommendationOverlay.toX, recommendationOverlay.toY);
+            const dx = b.x - a.x;
+            const dy = b.y - a.y;
+            const len = Math.max(Math.hypot(dx, dy), 0.01);
+            const ux = dx / len;
+            const uy = dy / len;
+            const shorten = Math.min(4.5, len * 0.15);
+            const x2 = b.x - ux * shorten;
+            const y2 = b.y - uy * shorten;
+            const x1 = a.x + ux * 2;
+            const y1 = a.y + uy * 2;
+            const head = 3.2;
+            const hx1 = x2 - ux * head - uy * head * 0.55;
+            const hy1 = y2 - uy * head + ux * head * 0.55;
+            const hx2 = x2 - ux * head + uy * head * 0.55;
+            const hy2 = y2 - uy * head - ux * head * 0.55;
+            return (
+              <g pointerEvents="none">
+                <line
+                  x1={x1}
+                  y1={y1}
+                  x2={x2}
+                  y2={y2}
+                  stroke="rgb(251, 191, 36)"
+                  strokeWidth={1.1}
+                  strokeDasharray="3 2"
+                  opacity={0.95}
+                />
+                <polygon
+                  points={`${x2},${y2} ${hx1},${hy1} ${hx2},${hy2}`}
+                  fill="rgb(251, 191, 36)"
+                  stroke="rgba(0,0,0,0.35)"
+                  strokeWidth={0.25}
+                />
+                {recommendationOverlay.label ? (
+                  <text
+                    x={(x1 + x2) / 2}
+                    y={(y1 + y2) / 2 - 2.5}
+                    textAnchor="middle"
+                    fill="rgb(253, 230, 138)"
+                    fontSize="3.2"
+                    fontWeight="600"
+                    style={{ textShadow: "0 0 4px rgba(0,0,0,0.9)" }}
+                  >
+                    {recommendationOverlay.label.length > 48
+                      ? `${recommendationOverlay.label.slice(0, 45)}…`
+                      : recommendationOverlay.label}
+                  </text>
+                ) : null}
+              </g>
+            );
+          })()}
         {playersSvg.map((p, i) => {
           const isPossessor =
             possessorId != null &&

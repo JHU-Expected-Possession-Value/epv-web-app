@@ -1,3 +1,4 @@
+# Production deploy hooks. Quality gate: .github/workflows/ci.yml (lint + build).
 name: Deploy Frontend (Vercel) + Backend (Render)
 
 on:

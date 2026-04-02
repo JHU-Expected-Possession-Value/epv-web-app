@@ -3,72 +3,129 @@
 import { useEffect, useRef, useState } from "react";
 import Container from "@/components/Container";
 import {
-  fetchLiveEval,
-  fetchLiveFrame,
-  fetchLiveMatches,
-  fetchLiveRange,
-  fetchLiveRoster,
   fetchRecommend,
   fetchReplayMatches,
   fetchReplayMoments,
-  fetchResimulate,
   fetchTrackingWindowRender,
-  type LiveEvalResponse,
-  type LiveMatchInfo,
-  type LiveRosterPlayer,
   type ReplayMatch,
   type ReplayMoment,
+  type ReplayMomentsResponse,
   type RecommendResponse,
-  type ReplayTrackingWindowResponse,
   type RenderFrame,
-  type ResimulateOptionAResponse,
   type TrackingRenderWindow,
 } from "@/lib/api";
 import TacticsBoard from "@/components/tactics/TacticsBoard";
-import PitchRenderer from "@/components/replay/PitchRenderer";
+import PitchRenderer, {
+  type RecommendationOverlayWorld,
+} from "@/components/replay/PitchRenderer";
 
 const PLAYBACK_TARGET_FPS = 30;
 const SPEED_OPTIONS = [0.25, 0.5, 1, 2] as const;
 
-type Tab = "tactical-board" | "replay" | "scenario-editor";
+type Tab = "tactical-board" | "replay";
 
 const tabs: { id: Tab; label: string }[] = [
   { id: "tactical-board", label: "Tactical Board" },
   { id: "replay", label: "Replay" },
-  { id: "scenario-editor", label: "Scenario Editor" },
 ];
 
 // TypeScript types for API responses
 type Match = ReplayMatch;
 type Moment = ReplayMoment;
-type WindowResponse = ReplayTrackingWindowResponse;
 
-const tabContent: Record<Tab, { title: string; bullets: string[] }> = {
-  "tactical-board": {
-    title: "Tactical Board",
-    bullets: [
-      "Sandbox tactics board with EPV decisions",
-      "Drag players to explore positioning and spacing",
-      "See best action arrows for passes, dribbles, and shots",
-    ],
-  },
-  replay: {
-    title: "Replay",
-    bullets: [
-      "Step through play-by-play events with EPV annotations",
-      "Replay key moments (turnovers, missed shots, big plays)",
-      "Counterfactual simulation: &quot;what if pass to X instead?&quot;",
-    ],
-  },
-  "scenario-editor": {
-    title: "Scenario Editor",
-    bullets: [
-      "Create custom game scenarios and situations",
-      "Test different decision outcomes and their EPV impact",
-      "Compare multiple tactical approaches side-by-side",
-    ],
-  },
+const TAB_BLURB: Record<Tab, string> = {
+  "tactical-board":
+    "Position players, read EPV-style actions, and explore an optional skill-based threat surface for the on-ball player.",
+  replay:
+    "Step through real turnover moments. Recommendation mode adds EPV teammate labels and a directional arrow on the same tracking—no alternate simulation.",
 };
+
+function inferPossessorFromFrame(frame: RenderFrame): number | null {
+  const ball = frame.ball;
+  if (!ball || ball.x == null || ball.y == null) return null;
+  const players = frame.players ?? [];
+  const maxDistSq = 2.5 * 2.5;
+  let bestId: number | null = null;
+  let bestD = maxDistSq;
+  for (const p of players) {
+    if (p.id == null) continue;
+    const d = (p.x - ball.x) ** 2 + (p.y - ball.y) ** 2;
+    if (d < bestD) {
+      bestD = d;
+      bestId = p.id;
+    }
+  }
+  return bestId;
+}
+
+function buildRecommendationOverlay(
+  frame: RenderFrame | null,
+  rec: RecommendResponse | null
+): RecommendationOverlayWorld | null {
+  if (!frame || !rec) return null;
+  const pid =
+    frame.derived_possession?.player_id ?? inferPossessorFromFrame(frame);
+  if (pid == null) return null;
+  const passer = frame.players?.find(
+    (p) => p.id === pid || Number(p.id) === Number(pid)
+  );
+  if (!passer) return null;
+
+  const tp = rec.recommendation.target_point;
+  const ov = rec.overlay;
+  const tid =
+    rec.recommendation.target_player_id ??
+    rec.chosen_target_player_id ??
+    rec.recommendation.target?.player_id ??
+    null;
+
+  let toX: number | null = null;
+  let toY: number | null = null;
+  if (tp && tp.x != null && tp.y != null) {
+    toX = tp.x;
+    toY = tp.y;
+  } else if (ov?.to && ov.to.x != null && ov.to.y != null) {
+    toX = ov.to.x;
+    toY = ov.to.y;
+  } else if (
+    rec.recommendation.target?.x != null &&
+    rec.recommendation.target?.y != null
+  ) {
+    toX = rec.recommendation.target.x;
+    toY = rec.recommendation.target.y;
+  } else if (tid != null) {
+    const tgt = frame.players?.find(
+      (p) => p.id === tid || Number(p.id) === Number(tid)
+    );
+    if (tgt) {
+      toX = tgt.x;
+      toY = tgt.y;
+    }
+  }
+
+  const action = (rec.recommendation.action ?? "").toLowerCase();
+  if (toX == null || toY == null) {
+    if (action.includes("shoot") || action.includes("shot")) {
+      toX = 52.5;
+      toY = 0;
+    } else {
+      return null;
+    }
+  }
+
+  const label =
+    rec.recommendation.summary ??
+    rec.recommendation.text ??
+    "Recommended action";
+
+  return {
+    fromX: passer.x,
+    fromY: passer.y,
+    toX,
+    toY,
+    label,
+  };
+}
 
 export default function DashboardPage() {
   const [activeTab, setActiveTab] = useState<Tab>("tactical-board");
@@ -78,9 +135,6 @@ export default function DashboardPage() {
   const [selectedMatchId, setSelectedMatchId] = useState<string>("");
   const [moments, setMoments] = useState<Moment[]>([]);
   const [selectedMoment, setSelectedMoment] = useState<Moment | null>(null);
-  const [trackingWindow, setTrackingWindow] = useState<WindowResponse | null>(
-    null
-  );
   const [trackingRenderWindow, setTrackingRenderWindow] =
     useState<TrackingRenderWindow | null>(null);
   const [loadingMatches, setLoadingMatches] = useState(false);
@@ -91,9 +145,7 @@ export default function DashboardPage() {
   const [windowError, setWindowError] = useState<string | null>(null);
 
   const [isPlaying, setIsPlaying] = useState(false);
-  // Separate frame index per mode so switching tabs preserves position
-  const [originalFrameIndex, setOriginalFrameIndex] = useState(0);
-  const [recommendedFrameIndex, setRecommendedFrameIndex] = useState(0);
+  const [frameIndex, setFrameIndex] = useState(0);
 
   // Client-side cache for render windows keyed by (match_id, center_frame)
   const renderCacheRef = useRef<Record<string, TrackingRenderWindow>>({});
@@ -114,10 +166,8 @@ export default function DashboardPage() {
   const originalFrames: RenderFrame[] = trackingRenderWindow?.frames ?? [];
   // Recommended: from POST recommend + POST resimulate for current moment
   const [recommendResponse, setRecommendResponse] = useState<RecommendResponse | null>(null);
-  const [recommendedFrames, setRecommendedFrames] = useState<RenderFrame[]>([]);
-  const [loadingResimulate, setLoadingResimulate] = useState(false);
+  const [loadingRecommend, setLoadingRecommend] = useState(false);
   const [recommendError, setRecommendError] = useState<string | null>(null);
-  const [resimMeta, setResimMeta] = useState<ResimulateOptionAResponse["meta"] | null>(null);
 
   // Fetch matches on mount and when refresh is clicked
   const fetchMatches = async () => {
@@ -144,16 +194,12 @@ export default function DashboardPage() {
       setError(null);
       setMoments([]);
       setSelectedMoment(null);
-      setTrackingWindow(null);
       setTrackingRenderWindow(null);
       setWindowError(null);
       setIsPlaying(false);
-      setOriginalFrameIndex(0);
-      setRecommendedFrameIndex(0);
+      setFrameIndex(0);
       setReplayMode("original");
       setRecommendResponse(null);
-      setRecommendedFrames([]);
-      setResimMeta(null);
       setMomentsOffset(0);
 
       fetchReplayMoments(selectedMatchId, MOMENTS_LIMIT, 0, isDev && momentsDedupeDebug !== null)
@@ -206,10 +252,8 @@ export default function DashboardPage() {
       setWindowError(null);
       setIsPlaying(false);
       setRecommendResponse(null);
-      setRecommendedFrames([]);
       setRecommendError(null);
-      setOriginalFrameIndex(0);
-      setRecommendedFrameIndex(0);
+      setFrameIndex(0);
 
       if (cached) {
         setTrackingRenderWindow(cached);
@@ -220,7 +264,7 @@ export default function DashboardPage() {
           const centerIdx = frames.findIndex(
             (f) => f.frame === effectiveCenter
           );
-          setOriginalFrameIndex(centerIdx >= 0 ? centerIdx : 0);
+          setFrameIndex(centerIdx >= 0 ? centerIdx : 0);
         }
         setLoadingWindow(false);
         return;
@@ -243,7 +287,7 @@ export default function DashboardPage() {
               const centerIdx = frames.findIndex(
                 (f) => f.frame === effectiveCenter
               );
-              setOriginalFrameIndex(centerIdx >= 0 ? centerIdx : 0);
+              setFrameIndex(centerIdx >= 0 ? centerIdx : 0);
             }
           })
           .catch((e) => {
@@ -275,7 +319,7 @@ export default function DashboardPage() {
   const handleReplayRecommended = async () => {
     if (!selectedMatchId || !selectedMoment) return;
     setRecommendError(null);
-    setLoadingResimulate(true);
+    setLoadingRecommend(true);
     setError(null);
     try {
       const centerFrame = selectedMoment.frame_end ?? selectedMoment.frame;
@@ -288,56 +332,34 @@ export default function DashboardPage() {
         undefined
       );
       setRecommendResponse(recommend);
-      const action = (recommend.recommendation.action === "carry_to_space"
-        ? "carry_to_space"
-        : "short_safe_pass") as "short_safe_pass" | "carry_to_space";
-      const recommendation = {
-        action,
-        target_player_id: recommend.recommendation.target_player_id ?? recommend.recommendation.target?.player_id ?? null,
-        target_point: recommend.recommendation.target_point ?? (recommend.overlay?.to ? { x: recommend.overlay.to.x, y: recommend.overlay.to.y } : null),
-      };
-      const resim = await fetchResimulate(
-        selectedMatchId,
-        centerFrame,
-        recommendation,
-        60,
-        90
-      );
-      setRecommendedFrames(resim.resimulated?.frames ?? []);
-      setResimMeta(resim.meta);
-      setRecommendedFrameIndex(0);
       setReplayMode("recommended");
       setIsPlaying(false);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       setRecommendError(msg);
       setReplayMode("original");
-      setRecommendedFrames([]);
       setRecommendResponse(null);
-      setResimMeta(null);
     } finally {
-      setLoadingResimulate(false);
+      setLoadingRecommend(false);
     }
   };
 
   const handleReplayOriginal = () => {
     setReplayMode("original");
+    setRecommendResponse(null);
+    setRecommendError(null);
     setIsPlaying(false);
     if (trackingRenderWindow?.frames?.length) {
       const center =
         trackingRenderWindow.effective_center_frame ?? trackingRenderWindow.center_frame;
       const idx = trackingRenderWindow.frames.findIndex((f) => f.frame === center);
-      setOriginalFrameIndex(idx >= 0 ? idx : 0);
+      setFrameIndex(idx >= 0 ? idx : 0);
     }
   };
 
-  // Playback: one timeline per mode; use the active mode's frames and index
-  const playbackFrames: RenderFrame[] =
-    replayMode === "recommended" ? recommendedFrames : originalFrames;
-  const currentFrameIndex =
-    replayMode === "original" ? originalFrameIndex : recommendedFrameIndex;
-  const setCurrentFrameIndex =
-    replayMode === "original" ? setOriginalFrameIndex : setRecommendedFrameIndex;
+  const playbackFrames: RenderFrame[] = originalFrames;
+  const currentFrameIndex = frameIndex;
+  const setCurrentFrameIndex = setFrameIndex;
 
   const playbackStartFrame =
     playbackFrames.length > 0 ? playbackFrames[0].frame : 0;
@@ -349,8 +371,6 @@ export default function DashboardPage() {
   // Playback: requestAnimationFrame, decoupled draw (rAF runs every frame) from frame-index step (every 1/(30*speed) sec)
   const playbackFramesRef = useRef(playbackFrames);
   playbackFramesRef.current = playbackFrames;
-  const replayModeRef = useRef(replayMode);
-  replayModeRef.current = replayMode;
   const playbackSpeedRef = useRef(playbackSpeed);
   playbackSpeedRef.current = playbackSpeed;
 
@@ -369,21 +389,13 @@ export default function DashboardPage() {
       const frames = playbackFramesRef.current;
       while (playbackRef.current.acc >= frameInterval && frames.length > 0) {
         playbackRef.current.acc -= frameInterval;
-        if (replayModeRef.current === "original") {
-          setOriginalFrameIndex((idx) =>
-            idx + 1 < frames.length ? idx + 1 : idx
-          );
-        } else {
-          setRecommendedFrameIndex((idx) =>
-            idx + 1 < frames.length ? idx + 1 : idx
-          );
-        }
+        setFrameIndex((idx) => (idx + 1 < frames.length ? idx + 1 : idx));
       }
       rafId = requestAnimationFrame(tick);
     };
     rafId = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafId);
-  }, [isPlaying, playbackSpeed, replayMode]);
+  }, [isPlaying, playbackSpeed]);
 
   const renderReplayTab = () => {
     return (
@@ -594,16 +606,14 @@ export default function DashboardPage() {
                   <button
                     type="button"
                     onClick={handleReplayRecommended}
-                    disabled={loadingResimulate}
+                    disabled={loadingRecommend}
                     className={`rounded-md border px-3 py-1.5 text-xs font-medium transition-colors disabled:opacity-50 ${
                       replayMode === "recommended"
                         ? "border-emerald-600 bg-emerald-600 text-white dark:border-emerald-500 dark:bg-emerald-500"
                         : "border-zinc-300 bg-white text-zinc-700 hover:bg-zinc-50 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
                     }`}
                   >
-                    {loadingResimulate
-                      ? "Loading..."
-                      : "Replay Recommended"}
+                    {loadingRecommend ? "Loading…" : "Recommendation overlay"}
                   </button>
                 </div>
 
@@ -629,14 +639,6 @@ export default function DashboardPage() {
                     </div>
                   </div>
                 )}
-                {replayMode === "recommended" && !recommendResponse && !loadingResimulate && recommendedFrames.length === 0 && !recommendError && (
-                  <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-700 dark:bg-zinc-800/50">
-                    <div className="text-sm text-zinc-600 dark:text-zinc-400">
-                      Click Replay Recommended to load synthetic sequence.
-                    </div>
-                  </div>
-                )}
-
                 {(() => {
                   const selectedMatch = matches.find(
                     (m) => m.match_id === selectedMatchId
@@ -667,7 +669,6 @@ export default function DashboardPage() {
                     : null;
                   const frameNumber = currentFrame?.frame ?? null;
                   const isCenter =
-                    replayMode === "original" &&
                     trackingRenderWindow != null &&
                     frameNumber != null &&
                     frameNumber ===
@@ -676,18 +677,21 @@ export default function DashboardPage() {
                   const effectiveCenter =
                     trackingRenderWindow?.effective_center_frame;
                   const showAdjustedNote =
-                    replayMode === "original" &&
                     effectiveCenter != null &&
                     trackingRenderWindow != null &&
                     effectiveCenter !== trackingRenderWindow.center_frame;
                   const highlightId =
                     currentFrame?.derived_possession?.player_id ??
-                    (replayMode === "recommended" && recommendResponse
-                      ? recommendResponse.recommendation.target_player_id ??
-                        recommendResponse.chosen_target_player_id ??
-                        recommendResponse.recommendation.target?.player_id ??
-                        null
+                    (currentFrame
+                      ? inferPossessorFromFrame(currentFrame)
                       : null);
+                  const recommendationOverlay =
+                    replayMode === "recommended"
+                      ? buildRecommendationOverlay(
+                          currentFrame,
+                          recommendResponse
+                        )
+                      : null;
 
                   // EPV overlays in recommended mode using backend teammate_overlays
                   const teammateValues =
@@ -714,14 +718,14 @@ export default function DashboardPage() {
                         <div className="flex flex-col gap-2 text-sm sm:flex-row sm:items-center sm:justify-between">
                           <div>
                             <div className="font-medium text-zinc-900 dark:text-white">
-                              {replayMode === "recommended"
-                                ? `Recommended: ${frames.length} frames`
-                                : `Frames loaded: ${frames.length}`}
+                              Frames loaded: {frames.length}
+                              {replayMode === "recommended" && recommendResponse
+                                ? " · recommendation overlay on"
+                                : ""}
                             </div>
                             <div className="text-zinc-600 dark:text-zinc-400">
-                              {replayMode === "recommended"
-                                ? `Range: ${playbackStartFrame} → ${playbackEndFrame}`
-                                : `Range: ${trackingRenderWindow?.start_frame ?? "—"} → ${trackingRenderWindow?.end_frame ?? "—"}`}
+                              Range: {trackingRenderWindow?.start_frame ?? playbackStartFrame} →{" "}
+                              {trackingRenderWindow?.end_frame ?? playbackEndFrame}
                             </div>
                           </div>
                           <div className="flex flex-wrap items-center gap-2">
@@ -784,29 +788,11 @@ export default function DashboardPage() {
                           </span>
                         )}
                         {replayMode === "recommended" && selectedMoment && (
-                          <span className="rounded border border-emerald-500 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-500">
-                            Resimulated from frame {selectedMoment.frame_end ?? selectedMoment.frame}
+                          <span className="rounded border border-amber-500/60 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:text-amber-400">
+                            Decision frame {selectedMoment.frame_end ?? selectedMoment.frame} · arrow + EPV labels
                           </span>
                         )}
                       </div>
-                      {/* Recommended info panel */}
-                      {replayMode === "recommended" && recommendResponse && (
-                        <div className="mt-2 rounded-md border border-emerald-500/40 bg-emerald-500/5 px-3 py-2 text-xs text-emerald-100">
-                          <div className="font-semibold text-emerald-300">
-                            {recommendResponse.recommendation.text}
-                          </div>
-                          {highlightTeammateId != null && (
-                            <div className="mt-0.5 text-emerald-200">
-                              Recommended pass target: player {highlightTeammateId}
-                            </div>
-                          )}
-                          {recommendResponse.fallback_reason && recommendResponse.recommendation.action !== "short_safe_pass" && (
-                            <div className="mt-0.5 text-amber-200">
-                              Fallback: carry into space (reason: {recommendResponse.fallback_reason})
-                            </div>
-                          )}
-                        </div>
-                      )}
                       <div className="mt-3 w-full min-w-0">
                         <PitchRenderer
                           frame={currentFrame ?? null}
@@ -815,7 +801,8 @@ export default function DashboardPage() {
                           highlightPlayerId={highlightId}
                           teammateValues={teammateValues}
                           highlightTeammateId={highlightTeammateId}
-                          className="w-full min-h-[260px]"
+                          recommendationOverlay={recommendationOverlay}
+                          className="w-full min-h-[280px]"
                         />
                       </div>
                     </>
@@ -843,8 +830,8 @@ export default function DashboardPage() {
         <h1 className="text-3xl font-bold tracking-tight text-zinc-900 dark:text-white sm:text-4xl">
           Interactive EPV Dashboard
         </h1>
-        <p className="mt-2 text-zinc-600 dark:text-zinc-400">
-          Analyze possession value, simulate decisions, and replay match moments.
+        <p className="mt-2 max-w-3xl text-zinc-600 dark:text-zinc-400">
+          {TAB_BLURB[activeTab]}
         </p>
 
         <div className="mt-12">
@@ -874,20 +861,9 @@ export default function DashboardPage() {
               <div className="rounded-xl border border-zinc-200 bg-white p-8 dark:border-zinc-800 dark:bg-zinc-900">
                 {renderLiveBoardTab()}
               </div>
-            ) : activeTab === "replay" ? (
-              <div className="rounded-xl border border-zinc-200 bg-white p-8 dark:border-zinc-800 dark:bg-zinc-900">
-                {renderReplayTab()}
-              </div>
             ) : (
-              <div className="rounded-xl border border-zinc-200 bg-white p-8 dark:border-zinc-800 dark:bg-zinc-900">
-                <h2 className="text-xl font-semibold text-zinc-900 dark:text-white">
-                  {tabContent[activeTab].title}
-                </h2>
-                <ul className="mt-4 space-y-2 list-disc list-inside pl-5 text-sm text-zinc-600 dark:text-zinc-400">
-                  {tabContent[activeTab].bullets.map((bullet, index) => (
-                    <li key={index}>{bullet}</li>
-                  ))}
-                </ul>
+              <div className="rounded-xl border border-zinc-200 bg-white p-8 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+                {renderReplayTab()}
               </div>
             )}
           </div>

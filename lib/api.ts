@@ -105,7 +105,7 @@ export type ReplayTrackingWindowResponse = {
   center_frame: number;
   start_frame: number;
   end_frame: number;
-  frames: any[];
+  frames: unknown[];
 };
 
 // Render-ready tracking window (normalized pitch coords: x in [-52.5,52.5], y in [-34,34])
@@ -429,7 +429,15 @@ export type TacticsPlayerIn = {
 };
 
 export type TacticsRecommendationRequest = {
-  ball_carrier: { player_id: string; x: number; y: number; team: "home" | "away" };
+  ball_carrier: {
+    player_id: string;
+    x: number;
+    y: number;
+    team: "home" | "away";
+    pass_skill?: number;
+    dribble_skill?: number;
+    shot_skill?: number;
+  };
   home: TacticsPlayerIn[];
   away: TacticsPlayerIn[];
 };
@@ -475,6 +483,26 @@ export async function fetchTacticsRecommendation(
 
 export async function fetchTacticsRoster(): Promise<TacticsRosterPlayer[]> {
   return apiGet<TacticsRosterPlayer[]>("/api/tactics/roster");
+}
+
+/** Relative threat grid for tactical-board heat overlay (skills + position; synthetic). */
+export type PlayerThreatHeatmapResponse = {
+  player_id: number;
+  player_name: string;
+  position: string;
+  cols: number;
+  rows: number;
+  cells: { col: number; row: number; intensity: number }[];
+  note: string;
+};
+
+export async function fetchPlayerThreatHeatmap(
+  playerId: number
+): Promise<PlayerThreatHeatmapResponse> {
+  const params = new URLSearchParams({ player_id: String(playerId) });
+  return apiGet<PlayerThreatHeatmapResponse>(
+    `/api/tactics/player-threat-heatmap?${params.toString()}`
+  );
 }
 
 export async function fetchResimulate(
