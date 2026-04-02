@@ -1,0 +1,24 @@
+[
+  { "player_id": "h1", "name": "Carlos Vela", "team": "LAFC", "position": "RW", "pass_skill": 0.9, "dribble_skill": 0.85, "shot_skill": 0.92 },
+  { "player_id": "h2", "name": "Denis Bouanga", "team": "LAFC", "position": "LW", "pass_skill": 0.8, "dribble_skill": 0.9, "shot_skill": 0.88 },
+  { "player_id": "h3", "name": "Ilie Sánchez", "team": "LAFC", "position": "CDM", "pass_skill": 0.88, "dribble_skill": 0.6, "shot_skill": 0.55 },
+  { "player_id": "h4", "name": "Kellyn Acosta", "team": "LAFC", "position": "CM", "pass_skill": 0.8, "dribble_skill": 0.7, "shot_skill": 0.65 },
+  { "player_id": "h5", "name": "Ryan Hollingshead", "team": "LAFC", "position": "RB", "pass_skill": 0.75, "dribble_skill": 0.65, "shot_skill": 0.5 },
+  { "player_id": "h6", "name": "Diego Palacios", "team": "LAFC", "position": "LB", "pass_skill": 0.78, "dribble_skill": 0.8, "shot_skill": 0.48 },
+  { "player_id": "h7", "name": "Giorgio Chiellini", "team": "LAFC", "position": "CB", "pass_skill": 0.7, "dribble_skill": 0.3, "shot_skill": 0.4 },
+  { "player_id": "h8", "name": "Jesús Murillo", "team": "LAFC", "position": "CB", "pass_skill": 0.68, "dribble_skill": 0.35, "shot_skill": 0.38 },
+  { "player_id": "h9", "name": "José Cifuentes", "team": "LAFC", "position": "CAM", "pass_skill": 0.82, "dribble_skill": 0.78, "shot_skill": 0.7 },
+  { "player_id": "h10", "name": "Cristian Arango", "team": "LAFC", "position": "ST", "pass_skill": 0.75, "dribble_skill": 0.7, "shot_skill": 0.9 },
+
+  { "player_id": "a1", "name": "Hany Mukhtar", "team": "NSH", "position": "CAM", "pass_skill": 0.87, "dribble_skill": 0.85, "shot_skill": 0.9 },
+  { "player_id": "a2", "name": "Walker Zimmerman", "team": "NSH", "position": "CB", "pass_skill": 0.72, "dribble_skill": 0.35, "shot_skill": 0.55 },
+  { "player_id": "a3", "name": "Dax McCarty", "team": "NSH", "position": "CM", "pass_skill": 0.82, "dribble_skill": 0.55, "shot_skill": 0.52 },
+  { "player_id": "a4", "name": "Aníbal Godoy", "team": "NSH", "position": "CDM", "pass_skill": 0.8, "dribble_skill": 0.5, "shot_skill": 0.48 },
+  { "player_id": "a5", "name": "Daniel Lovitz", "team": "NSH", "position": "LB", "pass_skill": 0.76, "dribble_skill": 0.65, "shot_skill": 0.45 },
+  { "player_id": "a6", "name": "Shaq Moore", "team": "NSH", "position": "RB", "pass_skill": 0.74, "dribble_skill": 0.7, "shot_skill": 0.46 },
+  { "player_id": "a7", "name": "C.J. Sapong", "team": "NSH", "position": "ST", "pass_skill": 0.7, "dribble_skill": 0.6, "shot_skill": 0.82 },
+  { "player_id": "a8", "name": "Randall Leal", "team": "NSH", "position": "LW", "pass_skill": 0.78, "dribble_skill": 0.82, "shot_skill": 0.72 },
+  { "player_id": "a9", "name": "Teal Bunbury", "team": "NSH", "position": "ST", "pass_skill": 0.68, "dribble_skill": 0.58, "shot_skill": 0.8 },
+  { "player_id": "a10", "name": "Alex Muyl", "team": "NSH", "position": "RW", "pass_skill": 0.72, "dribble_skill": 0.7, "shot_skill": 0.65 }
+]
+
