@@ -1,3 +1,12 @@
+/**
+ * Landing dashboard page.
+ *
+ * Purpose (this phase):
+ * - Provide a lightweight UI entrypoint and a basic API connectivity check.
+ * - This page does not talk to AWS RDS directly; it calls the FastAPI backend, which is the
+ *   only component that holds DB credentials and queries Postgres at request time.
+ */
+
 import Container from "@/components/Container";
 import { apiGet } from "@/lib/api";
 

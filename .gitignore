@@ -39,3 +39,10 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# --- Repo/tool generated (kept here for safety when working inside epv-web-app/) ---
+_pydeps/
+__pycache__/
+*.pyc
+.env
+.env.local

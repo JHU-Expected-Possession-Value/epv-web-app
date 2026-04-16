@@ -1,5 +1,14 @@
 "use client";
 
+/**
+ * Dashboard page (Replay + Tactical Board tabs).
+ *
+ * Purpose (this phase):
+ * - Replay uses AWS-backed backend endpoints (matches, moments, tracking windows)
+ * - Recommendation mode renders only a backend-provided EPV action arrow (pass/dribble/shot)
+ * - No resimulation / no trajectory regeneration in the frontend
+ */
+
 import { useEffect, useRef, useState } from "react";
 import Container from "@/components/Container";
 import {
@@ -158,13 +167,24 @@ export default function DashboardPage() {
   const [momentsDedupeDebug, setMomentsDedupeDebug] = useState<ReplayMomentsResponse["dedupe_debug"] | null>(null);
   const isDev = process.env.NODE_ENV !== "production";
 
+  /**
+   * Replay data flow (backend → frontend):
+   * 1) Match list: GET `/replay/matches` → dropdown
+   * 2) Moment list (loss-of-possession): GET `/replay/moments?match_id=...` → buttons
+   * 3) Tracking window for the selected moment: GET `/replay/tracking_window_render?...`
+   *    - Backend filters tracking in SQL by (match_id, frame range)
+   *    - Backend returns center coords (x∈[-52.5,52.5], y∈[-34,34]) for direct rendering
+   * 4) Recommended action arrow + EPV JSON (no resimulation): POST `/replay/recommend`
+   *    - Frontend renders only an arrow overlay and simple EPV/explanation text
+   */
+
   // Replay mode: "original" | "recommended"
   const [replayMode, setReplayMode] = useState<"original" | "recommended">(
     "original"
   );
   // Original window frames (from GET tracking_window_render when moment is selected)
   const originalFrames: RenderFrame[] = trackingRenderWindow?.frames ?? [];
-  // Recommended: from POST recommend + POST resimulate for current moment
+  // Recommended: from POST `/replay/recommend` (arrow only; no trajectory regeneration)
   const [recommendResponse, setRecommendResponse] = useState<RecommendResponse | null>(null);
   const [loadingRecommend, setLoadingRecommend] = useState(false);
   const [recommendError, setRecommendError] = useState<string | null>(null);
@@ -274,7 +294,11 @@ export default function DashboardPage() {
       setTrackingRenderWindow(null);
 
       const handle = setTimeout(() => {
-        // GET /replay/tracking_window_render → originalFrames for this moment
+        // Selected moment → preview window:
+        // - We request a render-ready tracking window centered on the moment's frame.
+        // - Backend clamps the requested range to existing `frame` rows and may return an
+        //   `effective_center_frame` if the exact event frame isn't present in tracking.
+        // - Response frames are in center coords (x∈[-52.5,52.5], y∈[-34,34]) which PitchRenderer consumes directly.
         fetchTrackingWindowRender(selectedMatchId, centerFrame, 60, 1, 120)
           .then((response) => {
             renderCacheRef.current[cacheKey] = response;
@@ -328,7 +352,7 @@ export default function DashboardPage() {
         selectedMoment.moment_id,
         centerFrame,
         selectedMoment.event_type ?? undefined,
-        (selectedMoment as { loser_side?: string }).loser_side ?? undefined,
+        undefined,
         undefined
       );
       setRecommendResponse(recommend);
@@ -633,9 +657,24 @@ export default function DashboardPage() {
                     <div className="text-sm font-medium text-zinc-900 dark:text-white">
                       {recommendResponse.recommendation.summary ?? recommendResponse.recommendation.text}
                     </div>
-                    <div className="mt-1 text-xs text-zinc-600 dark:text-zinc-400">
-                      EPV Δ: {recommendResponse.epv.epv_delta >= 0 ? "+" : ""}
-                      {recommendResponse.epv.epv_delta.toFixed(3)}
+                    {/* EPV-related output from backend (no resimulation): show action + EPV values */}
+                    <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-zinc-600 dark:text-zinc-400">
+                      <span>
+                        Action:{" "}
+                        <span className="font-semibold text-zinc-800 dark:text-zinc-200">
+                          {String(recommendResponse.recommendation.action ?? "").toUpperCase()}
+                        </span>
+                      </span>
+                      <span>
+                        EPV:{" "}
+                        <span className="font-mono font-semibold text-zinc-800 dark:text-zinc-200">
+                          {recommendResponse.epv.epv_original.toFixed(3)}
+                        </span>
+                      </span>
+                      <span>
+                        EPV Δ: {recommendResponse.epv.epv_delta >= 0 ? "+" : ""}
+                        {recommendResponse.epv.epv_delta.toFixed(3)}
+                      </span>
                     </div>
                   </div>
                 )}

@@ -1,4 +1,8 @@
 // lib/api.ts
+//
+// Purpose (this phase):
+// - Centralize frontend → backend calls for the AWS-backed FastAPI server
+// - Keep the frontend render-only: all DB queries/model inference/CV live in the backend
 
 export const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000";
@@ -42,6 +46,28 @@ export async function apiPost<T>(
   return res.json();
 }
 
+export async function apiPostForm<T>(
+  path: string,
+  form: FormData,
+  init?: RequestInit
+): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: "POST",
+    body: form,
+    cache: "no-store",
+    ...init,
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(
+      `POST ${path} failed: ${res.status} ${res.statusText}${
+        text ? ` - ${text}` : ""
+      }`
+    );
+  }
+  return res.json();
+}
+
 // ---- Replay API helpers ----
 
 export type ReplayTeamInfo = {
@@ -55,6 +81,11 @@ export type ReplayMatch = {
   home_team: ReplayTeamInfo;
   away_team: ReplayTeamInfo;
   label: string;
+  // Replayability is computed by the backend by checking required DB tables:
+  // `events` (moments) + `frame`/`detection` (tracking). The replay UI can
+  // filter out non-replayable matches or display a clean reason string.
+  replayable?: boolean;
+  replayability_reason?: string | null;
 };
 
 export type ReplayMatchesResponse = {
@@ -189,7 +220,9 @@ export async function fetchCounterfactual(
 }
 
 export async function fetchReplayMatches(): Promise<ReplayMatchesResponse> {
-  return apiGet<ReplayMatchesResponse>("/replay/matches");
+  // Prefer filtering out non-replayable matches server-side so the replay UI
+  // only offers matches that have both events and tracking loaded.
+  return apiGet<ReplayMatchesResponse>("/replay/matches?replayable_only=1");
 }
 
 /** Fetch deduped + paginated replay moments (limit/offset). */
@@ -481,28 +514,126 @@ export async function fetchTacticsRecommendation(
   return apiPost<TacticsRecommendationResponse>("/api/tactics/recommendation", payload);
 }
 
+export type TacticsTeam = { team_id: number; team_name?: string | null };
+
+export type TacticsPlayer = {
+  player_id: number;
+  name: string;
+  position?: string | null;
+  team_id?: number | null;
+  team_name?: string | null;
+  pass_skill: number;
+  dribble_skill: number;
+  shot_skill: number;
+};
+
+export async function fetchTacticsTeams(): Promise<TacticsTeam[]> {
+  return apiGet<TacticsTeam[]>("/api/tactics/teams");
+}
+
+export async function fetchTacticsPlayers(teamId: number): Promise<TacticsPlayer[]> {
+  const params = new URLSearchParams({ team_id: String(teamId) });
+  return apiGet<TacticsPlayer[]>(`/api/tactics/players?${params.toString()}`);
+}
+
 export async function fetchTacticsRoster(): Promise<TacticsRosterPlayer[]> {
+  // Legacy endpoint kept for backward compatibility.
   return apiGet<TacticsRosterPlayer[]>("/api/tactics/roster");
 }
 
-/** Relative threat grid for tactical-board heat overlay (skills + position; synthetic). */
-export type PlayerThreatHeatmapResponse = {
+export type PlayerActionHeatmapKind = "shots" | "passes" | "carries" | "goals";
+export type PlayerActionHeatmapResponse = {
   player_id: number;
   player_name: string;
-  position: string;
+  kind: PlayerActionHeatmapKind;
   cols: number;
   rows: number;
   cells: { col: number; row: number; intensity: number }[];
   note: string;
 };
 
-export async function fetchPlayerThreatHeatmap(
-  playerId: number
-): Promise<PlayerThreatHeatmapResponse> {
-  const params = new URLSearchParams({ player_id: String(playerId) });
-  return apiGet<PlayerThreatHeatmapResponse>(
-    `/api/tactics/player-threat-heatmap?${params.toString()}`
+export async function fetchPlayerActionHeatmap(
+  playerId: number,
+  kind: PlayerActionHeatmapKind,
+  teamSide?: "home" | "away" | null,
+  cols = 12,
+  rows = 8
+): Promise<PlayerActionHeatmapResponse> {
+  const params = new URLSearchParams({
+    player_id: String(playerId),
+    kind,
+    cols: String(cols),
+    rows: String(rows),
+  });
+  if (teamSide) params.set("team_side", teamSide);
+  return apiGet<PlayerActionHeatmapResponse>(
+    `/api/tactics/player-action-heatmap?${params.toString()}`
   );
+}
+
+// ---- CV / Clip Analyzer ----
+
+export type CvPlayerDetection = {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  center_x: number;
+  center_y: number;
+  team_guess?: string | null;
+  team_guess_distance?: number | null;
+  /** Meters on 105×68 field when homography was computed */
+  field_x_m?: number | null;
+  field_y_m?: number | null;
+};
+
+export type CvBallDetection = {
+  x: number;
+  y: number;
+  field_x_m?: number | null;
+  field_y_m?: number | null;
+} | null;
+
+export type CvHomography = {
+  H: number[][];
+  projected_points: number[][];
+} | null;
+
+export type CvAnalyzeImageResponse = {
+  /** Analysis frame size (bboxes are in this coordinate space; match overlay to this size). */
+  image_width: number;
+  image_height: number;
+  players: CvPlayerDetection[];
+  ball: CvBallDetection;
+  homography: CvHomography;
+  // Compact CV "recommended next action" (explicitly heuristic unless stated otherwise).
+  recommendation?: {
+    action: string;
+    explanation: string;
+    /** Confidence-like heuristic strength in [0,1]. */
+    strength: number;
+    is_model_based: boolean;
+    cues?: string[];
+    limitations?: string[];
+  } | null;
+};
+
+export type CvFeatureType = "Center Circle" | "Penalty Box" | "Sideline";
+
+export async function fetchCvAnalyzeImage(params: {
+  image: File;
+  rosterCsv?: File | null;
+  featureType?: CvFeatureType | null;
+  featurePoints?: [number, number][] | null;
+}): Promise<CvAnalyzeImageResponse> {
+  const form = new FormData();
+  form.append("image", params.image);
+  if (params.rosterCsv) form.append("roster_csv", params.rosterCsv);
+  if (params.featureType) form.append("feature_type", params.featureType);
+  if (params.featurePoints && params.featurePoints.length > 0) {
+    form.append("feature_points", JSON.stringify(params.featurePoints));
+  }
+  return apiPostForm<CvAnalyzeImageResponse>("/api/cv/analyze-image", form);
 }
 
 export async function fetchResimulate(

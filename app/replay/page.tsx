@@ -1,3 +1,11 @@
+/**
+ * Minimal Replay page wrapper.
+ *
+ * Purpose (this phase):
+ * - Keep the replay feature AWS-backed by relying on the FastAPI replay routes.
+ * - This page only renders a basic status panel and links into the main dashboard replay UI.
+ */
+
 import Container from "@/components/Container";
 import { apiGet } from "@/lib/api";
 
