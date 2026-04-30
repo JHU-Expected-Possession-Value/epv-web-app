@@ -150,14 +150,18 @@ export type RenderPlayer = {
   id: number | null;
   team_id: number | null;
   team_side?: "home" | "away" | null;
+  /** Full player name (resolved server-side from the players table). */
+  name?: string | null;
   x: number;
   y: number;
   speed?: number | null;
 };
 
 export type DerivedPossession = {
-  team_id: number;
-  player_id: number;
+  team_id: number | null;
+  player_id: number | null;
+  player_name?: string | null;
+  team_side?: "home" | "away" | null;
 };
 
 export type RenderFrame = {
@@ -167,6 +171,10 @@ export type RenderFrame = {
   ball: RenderBall | null;
   players: RenderPlayer[];
   derived_possession?: DerivedPossession | null;
+  /** Number of players actually present in this frame BEFORE backend forward-fill. */
+  raw_player_count?: number | null;
+  /** True if `players` was filled in from a neighbouring frame (raw was sparse/empty). */
+  players_filled?: boolean | null;
 };
 
 export type TrackingRenderWindow = {
@@ -291,15 +299,31 @@ export type RecommendResponse = {
     action: string;
     target?: RecommendTarget | null;
     target_player_id?: number | null;
+    target_player_name?: string | null;
     target_point?: { x: number; y: number } | null;
     summary?: string | null;
+    /** What the player actually did (mapped from event_type). */
+    actual_action?: "pass" | "dribble" | "shoot" | null;
+    actual_phrase?: string | null;
+    recommended_phrase?: string | null;
+    possessor_name?: string | null;
     epv_delta_est?: number | null;
   };
   overlay: CounterfactualOverlay | null;
   epv: {
+    /** Backward-compat alias for epv_actual. */
     epv_original: number;
+    /** EPV of the action the player actually took. */
+    epv_actual?: number;
+    /** EPV of the model's recommended action. */
     epv_recommended: number;
+    /** epv_recommended - epv_actual (positive means recommendation is better). */
     epv_delta: number;
+    actual_action?: "pass" | "dribble" | "shoot" | null;
+    recommended_action?: "pass" | "dribble" | "shoot" | null;
+    q_pass?: number;
+    q_dribble?: number;
+    q_shoot?: number;
   };
   decision_frame?: number | null;
   teammate_overlays?: {

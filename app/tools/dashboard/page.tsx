@@ -115,17 +115,28 @@ function buildRecommendationOverlay(
   const action = (rec.recommendation.action ?? "").toLowerCase();
   if (toX == null || toY == null) {
     if (action.includes("shoot") || action.includes("shot")) {
-      toX = 52.5;
+      // Aim at the goal the possessing team is attacking. Home → +X, Away → -X.
+      const possSide = passer.team_side ?? null;
+      toX = possSide === "away" ? -52.5 : 52.5;
       toY = 0;
     } else {
       return null;
     }
   }
 
-  const label =
-    rec.recommendation.summary ??
-    rec.recommendation.text ??
-    "Recommended action";
+  // Short, on-pitch label so it doesn't crowd the play. The full sentence (with
+  // EPV delta) lives in the panel above the pitch.
+  const labelParts: string[] = [];
+  if (rec.recommendation.recommended_phrase) {
+    labelParts.push(rec.recommendation.recommended_phrase);
+  } else {
+    labelParts.push(`Recommended: ${action || "action"}`);
+  }
+  if (rec.epv && typeof rec.epv.epv_delta === "number") {
+    const sign = rec.epv.epv_delta >= 0 ? "+" : "";
+    labelParts.push(`Δ${sign}${rec.epv.epv_delta.toFixed(3)}`);
+  }
+  const label = labelParts.join(" · ");
 
   return {
     fromX: passer.x,
@@ -651,33 +662,110 @@ export default function DashboardPage() {
                   </div>
                 )}
 
-                {/* Summary: "Instead of X do Y, EPV Δ: …" when Recommended active */}
-                {replayMode === "recommended" && recommendResponse && (
-                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 dark:border-amber-800 dark:bg-amber-900/20">
-                    <div className="text-sm font-medium text-zinc-900 dark:text-white">
-                      {recommendResponse.recommendation.summary ?? recommendResponse.recommendation.text}
-                    </div>
-                    {/* EPV-related output from backend (no resimulation): show action + EPV values */}
-                    <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-zinc-600 dark:text-zinc-400">
-                      <span>
-                        Action:{" "}
-                        <span className="font-semibold text-zinc-800 dark:text-zinc-200">
-                          {String(recommendResponse.recommendation.action ?? "").toUpperCase()}
+                {/* Summary: "What was done vs Recommended" comparison when in recommended mode */}
+                {replayMode === "recommended" && recommendResponse && (() => {
+                  const epv = recommendResponse.epv;
+                  const epvActual =
+                    typeof epv.epv_actual === "number"
+                      ? epv.epv_actual
+                      : epv.epv_original;
+                  const epvRec = epv.epv_recommended;
+                  const delta = epv.epv_delta;
+                  const actualAction =
+                    epv.actual_action ??
+                    recommendResponse.recommendation.actual_action ??
+                    null;
+                  const recommendedAction =
+                    epv.recommended_action ??
+                    recommendResponse.recommendation.action ??
+                    null;
+                  const actualPhrase =
+                    recommendResponse.recommendation.actual_phrase ??
+                    (actualAction ? `Player ${actualAction}` : "What they did");
+                  const recPhrase =
+                    recommendResponse.recommendation.recommended_phrase ??
+                    (recommendedAction
+                      ? `Recommended: ${recommendedAction}`
+                      : "Recommended action");
+                  const targetName =
+                    recommendResponse.recommendation.target_player_name ?? null;
+                  const possessorName =
+                    recommendResponse.recommendation.possessor_name ?? null;
+                  const deltaPositive = delta > 0.001;
+                  return (
+                    <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 dark:border-amber-800 dark:bg-amber-900/20">
+                      <div className="text-sm font-medium text-zinc-900 dark:text-white">
+                        {recommendResponse.recommendation.summary ??
+                          recommendResponse.recommendation.text}
+                      </div>
+                      <div className="mt-3 grid gap-3 text-xs sm:grid-cols-2">
+                        <div className="rounded-md border border-zinc-200 bg-white/60 p-3 dark:border-zinc-700 dark:bg-zinc-900/40">
+                          <div className="text-[10px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                            What they did
+                          </div>
+                          <div className="mt-0.5 text-sm text-zinc-800 dark:text-zinc-100">
+                            {actualPhrase}
+                            {actualAction ? (
+                              <span className="ml-1 rounded bg-zinc-200 px-1.5 py-0.5 text-[10px] font-mono uppercase text-zinc-700 dark:bg-zinc-700 dark:text-zinc-200">
+                                {actualAction}
+                              </span>
+                            ) : null}
+                          </div>
+                          <div className="mt-1 font-mono text-zinc-700 dark:text-zinc-300">
+                            EPV:{" "}
+                            <span className="font-semibold text-zinc-900 dark:text-white">
+                              {epvActual.toFixed(3)}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="rounded-md border border-emerald-300 bg-emerald-50/80 p-3 dark:border-emerald-700 dark:bg-emerald-900/30">
+                          <div className="text-[10px] font-semibold uppercase tracking-wide text-emerald-700 dark:text-emerald-300">
+                            Recommended
+                          </div>
+                          <div className="mt-0.5 text-sm text-zinc-800 dark:text-zinc-100">
+                            {recPhrase}
+                            {recommendedAction ? (
+                              <span className="ml-1 rounded bg-emerald-200 px-1.5 py-0.5 text-[10px] font-mono uppercase text-emerald-800 dark:bg-emerald-800 dark:text-emerald-100">
+                                {recommendedAction}
+                              </span>
+                            ) : null}
+                            {recommendedAction === "pass" && targetName ? (
+                              <span className="ml-1 text-zinc-600 dark:text-zinc-400">
+                                → {targetName}
+                              </span>
+                            ) : null}
+                          </div>
+                          <div className="mt-1 font-mono text-zinc-700 dark:text-zinc-300">
+                            EPV:{" "}
+                            <span className="font-semibold text-zinc-900 dark:text-white">
+                              {epvRec.toFixed(3)}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                      <div
+                        className={`mt-2 inline-flex items-center gap-1 rounded px-2 py-1 text-xs font-semibold ${
+                          deltaPositive
+                            ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200"
+                            : "bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300"
+                        }`}
+                      >
+                        ΔEPV {delta >= 0 ? "+" : ""}
+                        {delta.toFixed(3)}
+                        <span className="font-normal">
+                          {deltaPositive
+                            ? "(recommendation would have been better)"
+                            : "(close to or worse than what they did)"}
                         </span>
-                      </span>
-                      <span>
-                        EPV:{" "}
-                        <span className="font-mono font-semibold text-zinc-800 dark:text-zinc-200">
-                          {recommendResponse.epv.epv_original.toFixed(3)}
-                        </span>
-                      </span>
-                      <span>
-                        EPV Δ: {recommendResponse.epv.epv_delta >= 0 ? "+" : ""}
-                        {recommendResponse.epv.epv_delta.toFixed(3)}
-                      </span>
+                      </div>
+                      {possessorName && (
+                        <div className="mt-2 text-[11px] text-zinc-500 dark:text-zinc-400">
+                          Possessor: {possessorName}
+                        </div>
+                      )}
                     </div>
-                  </div>
-                )}
+                  );
+                })()}
                 {(() => {
                   const selectedMatch = matches.find(
                     (m) => m.match_id === selectedMatchId
@@ -703,8 +791,47 @@ export default function DashboardPage() {
                     rawFrame?.ball && rawFrame.ball.x != null && rawFrame.ball.y != null
                       ? rawFrame.ball
                       : lastValidBall;
+                  // Player forward/back fill (defense in depth — backend already
+                  // does this, but if every frame in the window happens to be
+                  // sparse, the backend's "rich" threshold won't trigger and
+                  // we'd still render only a single dot). We mirror the same
+                  // logic as the ball fallback: pick the densest frame in the
+                  // window and use it whenever the current frame is sparse.
+                  const allCounts = frames.map((f) => (f.players ?? []).length);
+                  const maxPlayerCount = allCounts.reduce(
+                    (m, c) => (c > m ? c : m),
+                    0
+                  );
+                  const richThreshold = Math.max(8, Math.floor(maxPlayerCount / 2));
+                  const currentCount = (rawFrame?.players ?? []).length;
+                  let playersForFrame = rawFrame?.players ?? [];
+                  if (currentCount < richThreshold) {
+                    // Walk backward first (closer to a rich layout in normal play).
+                    for (let i = clampedIndex - 1; i >= 0; i--) {
+                      const ps = frames[i]?.players ?? [];
+                      if (ps.length >= richThreshold) {
+                        playersForFrame = ps;
+                        break;
+                      }
+                    }
+                    // If still sparse (clip starts before any rich frame),
+                    // try forward.
+                    if ((playersForFrame ?? []).length < richThreshold) {
+                      for (let i = clampedIndex + 1; i < frames.length; i++) {
+                        const ps = frames[i]?.players ?? [];
+                        if (ps.length >= richThreshold) {
+                          playersForFrame = ps;
+                          break;
+                        }
+                      }
+                    }
+                  }
                   const currentFrame: RenderFrame | null = rawFrame
-                    ? { ...rawFrame, ball: ballForFrame ?? rawFrame.ball }
+                    ? {
+                        ...rawFrame,
+                        ball: ballForFrame ?? rawFrame.ball,
+                        players: playersForFrame,
+                      }
                     : null;
                   const frameNumber = currentFrame?.frame ?? null;
                   const isCenter =
@@ -724,6 +851,19 @@ export default function DashboardPage() {
                     (currentFrame
                       ? inferPossessorFromFrame(currentFrame)
                       : null);
+                  // Resolve a possessor name so it can render under the highlighted dot.
+                  // Prefer the server-side `derived_possession.player_name`; fall back to
+                  // the player roster on the same frame.
+                  let possessorLabel: string | null =
+                    currentFrame?.derived_possession?.player_name ?? null;
+                  if (!possessorLabel && highlightId != null && currentFrame?.players) {
+                    const match = currentFrame.players.find(
+                      (p) =>
+                        p.id === highlightId ||
+                        Number(p.id) === Number(highlightId)
+                    );
+                    possessorLabel = match?.name ?? null;
+                  }
                   const recommendationOverlay =
                     replayMode === "recommended"
                       ? buildRecommendationOverlay(
@@ -826,6 +966,21 @@ export default function DashboardPage() {
                             Adjusted to nearest valid frame.
                           </span>
                         )}
+                        {/* When the backend (or client) had to fill in players
+                            because this exact frame had a sparse/empty set in
+                            the database, surface that to the user so the
+                            visualization isn't misleading. */}
+                        {(currentFrame?.players_filled === true ||
+                          (rawFrame &&
+                            (rawFrame.players ?? []).length <
+                              (currentFrame?.players ?? []).length)) && (
+                          <span
+                            title="This frame had sparse tracking data; player positions were carried from the nearest dense frame."
+                            className="rounded border border-amber-500/60 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:text-amber-400"
+                          >
+                            players filled from neighbour
+                          </span>
+                        )}
                         {replayMode === "recommended" && selectedMoment && (
                           <span className="rounded border border-amber-500/60 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:text-amber-400">
                             Decision frame {selectedMoment.frame_end ?? selectedMoment.frame} · arrow + EPV labels
@@ -838,6 +993,7 @@ export default function DashboardPage() {
                           home_team_id={selectedMatch?.home_team?.id ?? null}
                           away_team_id={selectedMatch?.away_team?.id ?? null}
                           highlightPlayerId={highlightId}
+                          possessorLabel={possessorLabel}
                           teammateValues={teammateValues}
                           highlightTeammateId={highlightTeammateId}
                           recommendationOverlay={recommendationOverlay}

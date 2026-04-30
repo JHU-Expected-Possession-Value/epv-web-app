@@ -240,7 +240,10 @@ export default function PitchRenderer({
             (p.id === highlightTeammateId ||
               Number(p.id) === Number(highlightTeammateId));
           return (
-            <g key={p.id ?? i}>
+            // Composite key (id + index) defends against the rare case of
+            // duplicate player_ids in a single frame's detection rows; React
+            // would otherwise drop all but one to keep keys unique.
+            <g key={`${p.id ?? "unk"}-${i}`}>
               <circle
                 cx={p.x}
                 cy={p.y}
