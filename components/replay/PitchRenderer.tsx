@@ -55,8 +55,10 @@ function PitchLines() {
   );
 }
 
-const PLAYER_R = 3.2;
-const BALL_R = 1.8;
+// Pitch units (FIFA 105 × 68 m). A 3 m-wide dot would be ~1.5x a real player —
+// visible without dominating the play. Ball stays a touch smaller.
+const PLAYER_R = 1.5;
+const BALL_R = 0.9;
 
 export const PITCH_HOME_COLOR = "rgb(59, 130, 246)";
 export const PITCH_AWAY_COLOR = "rgb(234, 179, 8)";
